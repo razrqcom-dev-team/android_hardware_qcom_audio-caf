@@ -90,7 +90,11 @@ typedef struct EDID_AUDIO_INFO {
     int  channelAllocation;
 } EDID_AUDIO_INFO;
 
+#ifdef SAMSUNG_AUDIO
 #define DOCK_SWITCH "/sys/devices/virtual/switch/dock/state"
+#elif MOTOROLA_EMU_AUDIO
+#define DOCK_SWITCH "/sys/devices/virtual/switch/semu_audio/state"
+#endif
 
 class AudioUtil {
 public:
