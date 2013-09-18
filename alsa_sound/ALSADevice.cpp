@@ -1757,7 +1757,7 @@ char* ALSADevice::getUCMDevice(uint32_t devices, int input, char *rxDevice)
                 if (!mIsEmuAntipopOn) {
                     setEmuAntipop(1);
                 }
-                return strdup(SND_USE_CASE_DEV_DOCK_RX_SPEAKER);
+                return strdup(SND_USE_CASE_DEV_DOCK_SPEAKER);
 #else
                 return strdup(SND_USE_CASE_DEV_DOCK);
 #endif
@@ -1773,10 +1773,8 @@ char* ALSADevice::getUCMDevice(uint32_t devices, int input, char *rxDevice)
                 if (!mIsEmuAntipopOn) {
                     setEmuAntipop(1);
                 }
-                return strdup(SND_USE_CASE_DEV_DOCK_RX);
-#else
-                return strdup(SND_USE_CASE_DEV_DOCK); /* Dock RX */
 #endif
+                return strdup(SND_USE_CASE_DEV_DOCK); /* Dock RX */
             }
 #endif
             return strdup(SND_USE_CASE_DEV_USB_PROXY_RX); /* PROXY RX */
