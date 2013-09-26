@@ -352,7 +352,6 @@ public:
     int mADSPState;
     bool mSSRComplete;
     int mCurDevice;
-    long mAvailInMs;
 protected:
     friend class AudioHardwareALSA;
 private:
@@ -960,6 +959,9 @@ protected:
     uint32_t            mIncallMode;
 
     bool                mMicMute;
+    bool                mCSMicMute;
+    bool                mVoice2MicMute;
+    bool                mVoLTEMicMute;
     int mCSCallActive;
     int mVolteCallActive;
     int mVoice2CallActive;
