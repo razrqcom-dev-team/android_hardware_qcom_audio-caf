@@ -1054,6 +1054,18 @@ status_t AudioHardwareALSA::doRouting(int device)
                                     startUsbPlaybackIfNotStarted();
                                     musbPlaybackState |= USBPLAYBACKBIT_FM;
                                     break;
+                        }else if((!strcmp(it->useCase, SND_USE_CASE_VERB_IP_VOICECALL)) ||
+                                 (!strcmp(it->useCase, SND_USE_CASE_MOD_PLAY_VOIP)) ||
+                                 (!strcmp(it->useCase, SND_USE_CASE_MOD_CAPTURE_MUSIC) &&
+                                 (newMode == AudioSystem::MODE_IN_COMMUNICATION)) ||
+                                 (!strncmp(it->useCase, SND_USE_CASE_VERB_HIFI_REC,
+                                 strlen(SND_USE_CASE_VERB_HIFI_REC)) &&
+                                 (newMode == AudioSystem::MODE_IN_COMMUNICATION))) {
+                                    ALOGV("doRouting: VOIP device switch to proxy");
+                                    startUsbRecordingIfNotStarted();
+                                    startUsbPlaybackIfNotStarted();
+                                    musbRecordingState |= USBRECBIT_VOIPCALL;
+                                    musbPlaybackState |= USBPLAYBACKBIT_VOIPCALL;
                          }
                     }
         } else
@@ -1067,9 +1079,7 @@ status_t AudioHardwareALSA::doRouting(int device)
             uint32_t activeUsecase = useCaseStringToEnum(it->useCase);
             if (!((device & AudioSystem::DEVICE_OUT_ALL_A2DP) &&
                   (mCurRxDevice & AUDIO_DEVICE_OUT_ALL_USB))) {
-                if ((activeUsecase == USECASE_HIFI_LOW_POWER) ||
-                    (activeUsecase == USECASE_HIFI_TUNNEL)) {
-                    if (device != mCurRxDevice) {
+                   if (device != mCurRxDevice) {
                         if((isExtOutDevice(mCurRxDevice)) &&
                            (isExtOutDevice(device))) {
                             activeUsecase = getExtOutActiveUseCases_l();
@@ -1079,24 +1089,6 @@ status_t AudioHardwareALSA::doRouting(int device)
                         mALSADevice->route(&(*it),(uint32_t)device, newMode);
                     }
                     err = startPlaybackOnExtOut_l(activeUsecase);
-                } else {
-                    //WHY NO check for prev device here?
-                    if (device != mCurRxDevice) {
-                        if((isExtOutDevice(mCurRxDevice)) &&
-                            (isExtOutDevice(device))) {
-                            activeUsecase = getExtOutActiveUseCases_l();
-                            stopPlaybackOnExtOut_l(activeUsecase);
-                            mALSADevice->route(&(*it),(uint32_t)device, newMode);
-                            mRouteAudioToExtOut = true;
-                            startPlaybackOnExtOut_l(activeUsecase);
-                        } else {
-                           mALSADevice->route(&(*it),(uint32_t)device, newMode);
-                        }
-                    }
-                    if (activeUsecase == USECASE_FM){
-                        err = startPlaybackOnExtOut_l(activeUsecase);
-                    }
-                }
                 if(err) {
                     ALOGW("startPlaybackOnExtOut_l for hardware output failed err = %d", err);
                     stopPlaybackOnExtOut_l(activeUsecase);
@@ -2741,6 +2733,7 @@ status_t AudioHardwareALSA::closeExtOutput(int device) {
     ALOGV("closeExtOutput");
     status_t err = NO_ERROR;
     Mutex::Autolock autolock1(mExtOutMutex);
+    Mutex::Autolock autolock2(mExtOutMutexWrite);
     if (device & AudioSystem::DEVICE_OUT_ALL_A2DP) {
         if(mExtOutStream == mA2dpStream)
             mExtOutStream = NULL;
@@ -2959,7 +2952,7 @@ void AudioHardwareALSA::extOutThreadFunc() {
     uint32_t bytesAvailInBuffer = 0;
     uint32_t proxyBufferTime = 0;
     void  *data;
-    int err = NO_ERROR;
+    status_t err = NO_ERROR;
     ssize_t size = 0;
     void * outbuffer= malloc(AFE_PROXY_PERIOD_SIZE);
 
@@ -2989,7 +2982,12 @@ void AudioHardwareALSA::extOutThreadFunc() {
             }
         }
         err = mALSADevice->readFromProxy(&data, &size);
-        if (err < 0) {
+        if(err == (status_t) FAILED_TRANSACTION) {
+            ALOGE("readFromProxy returned an error, mostly a flush or an under run continuing");
+            err = NO_ERROR;
+            continue;
+        }
+        if(err < 0  || size <= 0) {
             ALOGE("ALSADevice readFromProxy returned err = %d,data = %p,\
                     size = %ld", err, data, size);
             continue;
@@ -3022,14 +3020,17 @@ void AudioHardwareALSA::extOutThreadFunc() {
         while (err == OK && (numBytesRemaining  > 0) && !mKillExtOutThread
                 && mIsExtOutEnabled ) {
             {
-                Mutex::Autolock autolock1(mExtOutMutex);
+                mExtOutMutexWrite.lock();
                 if(mExtOutStream != NULL ) {
                     bytesAvailInBuffer = mExtOutStream->common.get_buffer_size(&mExtOutStream->common);
                     uint32_t writeLen = bytesAvailInBuffer > numBytesRemaining ?
                                     numBytesRemaining : bytesAvailInBuffer;
                     ALOGV("Writing %d bytes to External Output ", writeLen);
                     bytesWritten = mExtOutStream->write(mExtOutStream,copyBuffer, writeLen);
+                    mExtOutMutexWrite.unlock();
                 } else {
+                    //unlock the mutex before sleep
+                    mExtOutMutexWrite.unlock();
                     ALOGV(" No External output to write  ");
                     usleep(proxyBufferTime*1000);
                     bytesWritten = numBytesRemaining;
@@ -3037,8 +3038,8 @@ void AudioHardwareALSA::extOutThreadFunc() {
             }
             //If the write fails make this thread sleep and let other
             //thread (eg: stopA2DP) to acquire lock to prevent a deadlock.
-            if(bytesWritten == -1) {
-                ALOGV("bytesWritten = %d",bytesWritten);
+            if(bytesWritten < 0 || bytesWritten == 0) {
+                ALOGE("bytesWritten = %d",bytesWritten);
                 usleep(10000);
                 break;
             }
